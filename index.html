@@ -71,6 +71,9 @@
     .modal-add:hover { background: var(--green-dark); }
     .modal-close { margin-top: 8px; width: 100%; padding: 10px; border: 1px solid #ddd;
         border-radius: 8px; background: #fff; cursor: pointer; }
+    .setup-lbl { font-size: .8rem; color: #666; display: block; text-align: left; }
+    .setup-inp { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;
+        margin: 4px 0 10px; font-size: 1rem; box-sizing: border-box; }
     .item .price { color: var(--gold); font-weight: bold; margin-top: 4px; }
     .item .price .chk { color: #c0392b; font-weight: bold; }
     .item .desc { font-size: .72rem; color: #999; margin-top: 4px; line-height: 1.3; }
@@ -151,6 +154,7 @@
     <label for="table-select">Стол:</label>
     <select id="table-select"></select>
     <button type="button" onclick="openLog()">📜 Журнал заказов</button>
+    <button type="button" onclick="openSetup()">⚙️ Настройки</button>
     <input type="text" class="search" id="menu-search" placeholder="🔍 Поиск по меню…">
 </div>
 
@@ -179,6 +183,21 @@
 </div>
 
 <div id="toast2"></div>
+
+<div class="modal" id="setup-modal">
+    <div class="modal-box" style="text-align:left">
+        <h3>Настройка приложения</h3>
+        <p class="hint">Один раз на этом устройстве: подключите чат кухни. Данные сохранятся в браузере планшета.</p>
+        <label class="setup-lbl" for="setup-token">Токен бота (от @BotFather)</label>
+        <input type="text" id="setup-token" class="setup-inp" placeholder="1234567890:AA...">
+        <label class="setup-lbl" for="setup-chat">ID чата кухни</label>
+        <input type="text" id="setup-chat" class="setup-inp" placeholder="-1001234567890">
+        <label class="setup-lbl" for="setup-waiter">Имя официанта (необязательно)</label>
+        <input type="text" id="setup-waiter" class="setup-inp" placeholder="Аня">
+        <button type="button" class="modal-add" onclick="saveSetup()">Сохранить и проверить</button>
+        <button type="button" class="modal-close" onclick="closeSetup()">Работать без связи (офлайн)</button>
+    </div>
+</div>
 <div class="modal" id="item-modal" onclick="if (event.target === this) closeModal()">
     <div class="modal-box" id="modal-box"></div>
 </div>
@@ -215,9 +234,28 @@ function toast(msg, isError) {
     clearTimeout(t._timer);
     t._timer = setTimeout(() => t.className = '', 3000);
 }
+function cfgGet() {
+    let c = null;
+    try { c = JSON.parse(lsGet('pos_riko_cfg') || 'null'); } catch (e) {}
+    return c || {};
+}
+function tgToken() {
+    const t = CONFIG.TELEGRAM_TOKEN;
+    if (t && t !== 'ТВОЙ_ТОКЕН_БОТА' && t.indexOf('__') !== 0) return t;
+    return cfgGet().token || '';
+}
+function tgChat() {
+    const c = CONFIG.CHAT_ID_KITCHEN;
+    if (c && c !== 'ID_ЧАТА_КУХНИ' && c.indexOf('__') !== 0) return c;
+    return cfgGet().chat || '';
+}
+function waiterName() {
+    const n = CONFIG.WAITER_NAME;
+    if (n && n !== '__WAITER_NAME__' && n.indexOf('__') !== 0) return n;
+    return cfgGet().waiter || '';
+}
 function configReady() {
-    return CONFIG.TELEGRAM_TOKEN && !CONFIG.TELEGRAM_TOKEN.includes('ТВОЙ') &&
-           CONFIG.CHAT_ID_KITCHEN && !CONFIG.CHAT_ID_KITCHEN.includes('ID_');
+    return !!tgToken() && !!tgChat();
 }
 function fmt(n) { return Number(n).toFixed(2).replace('.', ','); }
 function findCat(catId) { return MENU.find(c => c.id === catId); }
@@ -474,14 +512,14 @@ async function sendOrder() {
         return (i + 1) + '. ' + line.name + opt + mods + ' ×' + line.qty + ' — ' + fmt(lineTotal(line)) + ' BYN';
     });
     const total = cart.reduce((s, l) => s + lineTotal(l), 0);
-    const waiterLine = CONFIG.WAITER_NAME ? '\n👤 Официант: ' + CONFIG.WAITER_NAME : '';
+    const waiterLine = waiterName() ? '\n👤 Официант: ' + waiterName() : '';
     const text = '🍳 НОВЫЙ ЗАКАЗ #' + orderCounter + '\n📋 Стол: ' + table + '\n🕒 ' + time + waiterLine +
         '\n\n' + lines.join('\n') + '\n\n💵 Итого: ' + fmt(total) + ' BYN\n\n#принять #готово';
     try {
-        const resp = await fetch('https://api.telegram.org/bot' + CONFIG.TELEGRAM_TOKEN + '/sendMessage', {
+        const resp = await fetch('https://api.telegram.org/bot' + tgToken() + '/sendMessage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: CONFIG.CHAT_ID_KITCHEN, text })
+            body: JSON.stringify({ chat_id: tgChat(), text })
         });
         const data = await resp.json();
         if (!data.ok) throw new Error(data.description || 'Telegram API error');
@@ -518,12 +556,12 @@ function closeLog() {
 }
 
 async function fetchRemoteMenu() {
-    if (!CONFIG.TELEGRAM_TOKEN || CONFIG.TELEGRAM_TOKEN === 'ТВОЙ_ТОКЕН_БОТА' || !CONFIG.CHAT_ID_KITCHEN) return;
+    if (!tgToken() || tgToken() === 'ТВОЙ_ТОКЕН_БОТА' || !tgChat()) return;
     let fileId = CONFIG.MENU_FILE_ID && CONFIG.MENU_FILE_ID !== '__MENU_FILE_ID__' ? CONFIG.MENU_FILE_ID : '';
     try {
-        const r = await fetch('https://api.telegram.org/bot' + CONFIG.TELEGRAM_TOKEN + '/getChat', {
+        const r = await fetch('https://api.telegram.org/bot' + tgToken() + '/getChat', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: CONFIG.CHAT_ID_KITCHEN })
+            body: JSON.stringify({ chat_id: tgChat() })
         });
         const d = await r.json();
         const pm = d.ok && d.result && d.result.pinned_message;
@@ -531,13 +569,13 @@ async function fetchRemoteMenu() {
     } catch (e) {}
     if (!fileId) return;
     try {
-        const g = await fetch('https://api.telegram.org/bot' + CONFIG.TELEGRAM_TOKEN + '/getFile', {
+        const g = await fetch('https://api.telegram.org/bot' + tgToken() + '/getFile', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_id: fileId })
         });
         const gd = await g.json();
         if (!gd.ok || !gd.result.file_path) throw new Error('getFile');
-        const dl = await fetch('https://api.telegram.org/file/bot' + CONFIG.TELEGRAM_TOKEN + '/' + gd.result.file_path);
+        const dl = await fetch('https://api.telegram.org/file/bot' + tgToken() + '/' + gd.result.file_path);
         const menu = JSON.parse(await dl.text());
         if (Array.isArray(menu) && menu.length) {
             MENU = menu;
@@ -556,6 +594,41 @@ async function fetchRemoteMenu() {
     }
 }
 
+function openSetup() {
+    const c = cfgGet();
+    document.getElementById('setup-token').value = c.token || '';
+    document.getElementById('setup-chat').value = c.chat || '';
+    document.getElementById('setup-waiter').value = c.waiter || '';
+    document.getElementById('setup-modal').classList.add('open');
+}
+function closeSetup() {
+    document.getElementById('setup-modal').classList.remove('open');
+}
+async function saveSetup() {
+    const token = document.getElementById('setup-token').value.trim();
+    const chat = document.getElementById('setup-chat').value.trim();
+    const waiter = document.getElementById('setup-waiter').value.trim();
+    if (!token || !chat) return toast('Заполните токен и ID чата', true);
+    toast('Проверяю подключение…');
+    try {
+        const r = await fetch('https://api.telegram.org/bot' + token + '/getMe');
+        const d = await r.json();
+        if (!d.ok) throw new Error('токен не принят Telegram');
+        const r2 = await fetch('https://api.telegram.org/bot' + token + '/getChat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chat })
+        });
+        const d2 = await r2.json();
+        if (!d2.ok) throw new Error('ID чата не принят: ' + (d2.description || ''));
+        lsSet('pos_riko_cfg', JSON.stringify({ token, chat, waiter }));
+        closeSetup();
+        toast('Подключено ✅');
+        fetchRemoteMenu();
+    } catch (e) {
+        toast('Не сохранилось: ' + e.message, true);
+    }
+}
+
 (function init() {
     const select = document.getElementById('table-select');
     TABLES.forEach(t => {
@@ -569,7 +642,7 @@ async function fetchRemoteMenu() {
         renderMenu();
     };
     if (!configReady()) {
-        document.getElementById('config-warning').style.display = 'block';
+        openSetup();
     }
     renderMenu();
     renderCart();
